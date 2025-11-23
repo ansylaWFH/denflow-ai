@@ -6,23 +6,56 @@ import {
     Play, Square, Settings, FileText, Users,
     Activity, Terminal, Save, Upload, RefreshCw,
     Smartphone, Monitor, Send, Clock, Menu, X,
-    Home, Mail, List, History as HistoryIcon, Cog
+    Home, Mail, List, History as HistoryIcon, Cog, LogOut
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { supabase } from './supabaseClient';
+import Auth from './Auth';
 
 const API_URL = 'http://localhost:8000';
 
 // Mobile-First App Component
 function App() {
+    const [session, setSession] = useState(null);
+
+    useEffect(() => {
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            setSession(session);
+        });
+
+        const {
+            data: { subscription },
+        } = supabase.auth.onAuthStateChange((_event, session) => {
+            setSession(session);
+        });
+
+        return () => subscription.unsubscribe();
+    }, []);
+
+    if (!session) {
+        return <Auth />;
+    }
+
     return (
         <ErrorBoundary>
-            <AppContent />
+            <AppContent session={session} />
         </ErrorBoundary>
     );
 }
 
-function AppContent() {
+function AppContent({ session }) {
     const [activeTab, setActiveTab] = useState('dashboard');
+    // ... rest of the component
+    // Add Authorization header to axios requests
+    useEffect(() => {
+        if (session?.access_token) {
+            axios.defaults.headers.common['Authorization'] = `Bearer ${session.access_token}`;
+        }
+    }, [session]);
+
+    const handleLogout = async () => {
+        await supabase.auth.signOut();
+    };
     const [status, setStatus] = useState({
         status: 'IDLE',
         current_index: 0,
@@ -116,8 +149,8 @@ function AppContent() {
                 </div>
                 <div className="flex items-center space-x-2">
                     <div className={`px-3 py-1 rounded-full text-xs font-medium ${status.status === 'RUNNING'
-                            ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
-                            : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
+                        ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
+                        : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
                         }`}>
                         {status.status}
                     </div>
@@ -171,8 +204,8 @@ const NavTab = ({ icon: Icon, label, active, onClick }) => (
     <button
         onClick={onClick}
         className={`flex flex-col items-center justify-center px-3 py-2 rounded-lg transition-all min-w-[60px] ${active
-                ? 'text-indigo-600 dark:text-indigo-400'
-                : 'text-gray-500 dark:text-gray-400'
+            ? 'text-indigo-600 dark:text-indigo-400'
+            : 'text-gray-500 dark:text-gray-400'
             }`}
     >
         <Icon size={22} className={active ? 'mb-1' : 'mb-1'} strokeWidth={active ? 2.5 : 2} />

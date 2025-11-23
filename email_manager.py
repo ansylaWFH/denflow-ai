@@ -1,6 +1,5 @@
 import smtplib
 import time
-import csv
 import json
 import os
 import threading
@@ -8,133 +7,134 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.utils import formataddr
 from datetime import datetime
+from sqlalchemy.orm import Session
+from database import get_db, SMTPConfig, Recipient, CampaignLog, Unsubscribe, init_db
 
 class EmailManager:
-    def __init__(self):
+    def __init__(self, user_id: str):
+        self.user_id = user_id
         # State
         self.is_running = False
         self.stop_event = threading.Event()
         self.thread = None
         self.status = "IDLE"
-        self.logs = []
-        self.current_index = 0
-        self.total_recipients = 0
-        self.sent_count_in_batch = 0
         self.current_email = ""
         
-        # Files
-        self.CSV_FILE = "mail list.csv"
-        self.HTML_FILE = "mail.html"
-        self.INTERRUPT_FILE = "last_processed.json"
-        
-        # Configs (Default from main.py)
+        # Configs
         self.SWITCH_LIMIT = 200
         self.BATCH_SIZE = 30
         self.SHORT_WAIT_SECONDS = 120
         self.LONG_WAIT_SECONDS = 2800
         self.DAILY_LIMIT_PAUSE_SECONDS = 12 * 3600
         
-        self.public_url = "" # Set via API
-        self.unsubscribes = set()
-        self.opens = {} # email -> timestamp
-        self.load_unsubscribes()
+        self.public_url = "" 
         
-        self.smtp_configs = [
+        # Initialize DB (Global init, safe to call multiple times)
+        init_db()
+
+    def get_db_session(self):
+        return next(get_db())
+
+    def get_configs(self):
+        db = self.get_db_session()
+        configs = db.query(SMTPConfig).filter(SMTPConfig.user_id == self.user_id).all()
+        return [
             {
-                "SERVER": "smtp.gmail.com",
-                "PORT": 587,
-                "EMAIL": "prmoted@gmail.com",
-                "PASSWORD": "oklp rmem ajlc bvtz",
-                "DISPLAY_NAME": "MG from Prmoted"
-            },
-            {
-                "SERVER": "smtp.gmail.com",
-                "PORT": 587,
-                "EMAIL": "dftmori@gmail.com",
-                "PASSWORD": "gwfs cibd iyek krqq",
-                "DISPLAY_NAME": "MG from Prmoted"
-            }
+                "SERVER": c.server,
+                "PORT": c.port,
+                "EMAIL": c.email,
+                "PASSWORD": c.password,
+                "DISPLAY_NAME": c.display_name
+            } for c in configs
         ]
 
-    def load_unsubscribes(self):
-        if os.path.exists("unsubscribes.txt"):
-            with open("unsubscribes.txt", "r", encoding="utf-8") as f:
-                self.unsubscribes = set(line.strip() for line in f if line.strip())
+    def save_configs(self, new_configs):
+        db = self.get_db_session()
+        db.query(SMTPConfig).filter(SMTPConfig.user_id == self.user_id).delete()
+        for c in new_configs:
+            config = SMTPConfig(
+                user_id=self.user_id,
+                server=c.get("SERVER", "smtp.gmail.com"),
+                port=int(c.get("PORT", 587)),
+                email=c["EMAIL"],
+                password=c["PASSWORD"],
+                display_name=c.get("DISPLAY_NAME", "")
+            )
+            db.add(config)
+        db.commit()
+        self.log("Configurations updated in DB.")
+
+    def is_unsubscribed(self, email):
+        db = self.get_db_session()
+        return db.query(Unsubscribe).filter(Unsubscribe.user_id == self.user_id, Unsubscribe.email == email).first() is not None
 
     def unsubscribe_user(self, email):
-        if email not in self.unsubscribes:
-            self.unsubscribes.add(email)
-            with open("unsubscribes.txt", "a", encoding="utf-8") as f:
-                f.write(email + "\n")
+        if not self.is_unsubscribed(email):
+            db = self.get_db_session()
+            db.add(Unsubscribe(user_id=self.user_id, email=email))
+            db.commit()
             self.log(f"Unsubscribed: {email}")
 
-    def record_open(self, email):
-        if email not in self.opens:
-            self.opens[email] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            self.log(f"Email Opened: {email}")
-
     def get_analytics(self):
+        db = self.get_db_session()
+        total_sent = db.query(Recipient).filter(Recipient.user_id == self.user_id, Recipient.status == 'sent').count()
+        unsubscribes = db.query(Unsubscribe).filter(Unsubscribe.user_id == self.user_id).count()
         return {
-            "total_sent": self.current_index, # Approximate
-            "opens": len(self.opens),
-            "unsubscribes": len(self.unsubscribes)
+            "total_sent": total_sent,
+            "opens": 0, 
+            "unsubscribes": unsubscribes
         }
 
     def log(self, message):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        entry = f"[{timestamp}] {message}"
-        print(entry)
-        self.logs.append(entry)
-        if len(self.logs) > 1000:
-            self.logs.pop(0)
+        print(f"[{self.user_id}] [{timestamp}] {message}")
         
-        # Persist to file
         try:
-            with open("campaign_logs.txt", "a", encoding="utf-8") as f:
-                f.write(entry + "\n")
-        except Exception:
-            pass
+            db = self.get_db_session()
+            db.add(CampaignLog(user_id=self.user_id, message=message))
+            db.commit()
+        except Exception as e:
+            print(f"Logging failed: {e}")
+
+    def get_recent_logs(self, limit=50):
+        db = self.get_db_session()
+        logs = db.query(CampaignLog).filter(CampaignLog.user_id == self.user_id).order_by(CampaignLog.timestamp.desc()).limit(limit).all()
+        return [f"[{l.timestamp}] {l.message}" for l in logs][::-1]
 
     def get_status(self):
+        db = self.get_db_session()
+        total = db.query(Recipient).filter(Recipient.user_id == self.user_id).count()
+        sent = db.query(Recipient).filter(Recipient.user_id == self.user_id, Recipient.status == 'sent').count()
+        
         return {
             "status": self.status,
-            "current_index": self.current_index,
-            "total_recipients": self.total_recipients,
+            "current_index": sent,
+            "total_recipients": total,
             "current_email": self.current_email,
-            "logs": self.logs[-50:], # Return last 50 logs
-            "configs": self.smtp_configs
+            "logs": self.get_recent_logs(),
+            "configs": self.get_configs()
         }
-
-    def update_configs(self, new_configs):
-        self.smtp_configs = new_configs
-        self.log("Configurations updated.")
 
     def _inject_tracking(self, html, email):
         if not self.public_url:
             return html
-            
-        # Add Open Pixel
-        pixel_url = f"{self.public_url}/track/open?email={email}"
-        pixel_tag = f'<img src="{pixel_url}" width="1" height="1" style="display:none;" />'
         
-        # Add Unsubscribe Link
-        unsub_url = f"{self.public_url}/unsubscribe?email={email}"
+        # Append user_id to tracking links so backend knows which user to attribute to
+        pixel_url = f"{self.public_url}/track/open?email={email}&uid={self.user_id}"
+        pixel_tag = f'<img src="{pixel_url}" width="1" height="1" style="display:none;" />'
+        unsub_url = f"{self.public_url}/unsubscribe?email={email}&uid={self.user_id}"
         footer = f'''
         <div style="text-align: center; font-size: 12px; color: #888; margin-top: 20px; border-top: 1px solid #eee; padding-top: 10px;">
             <a href="{unsub_url}" style="color: #888;">Unsubscribe</a>
         </div>
         '''
-        
-        # Insert before </body> if exists, else append
         if "</body>" in html:
             html = html.replace("</body>", f"{pixel_tag}{footer}</body>")
         else:
             html += f"{pixel_tag}{footer}"
-            
         return html
 
     def _personalize_email(self, html_template, row_data):
-        """Replace all {field_name} placeholders with actual data from CSV row"""
         html = html_template
         for key, value in row_data.items():
             placeholder = f"{{{key}}}"
@@ -144,32 +144,26 @@ class EmailManager:
     def send_test_email(self, recipient_email):
         self.log(f"Sending test email to {recipient_email}...")
         try:
-            # Use the first config for testing
-            config = self.smtp_configs[0]
+            configs = self.get_configs()
+            if not configs:
+                raise Exception("No SMTP configurations found.")
             
-            if not os.path.exists(self.HTML_FILE):
-                raise Exception("HTML Template not found.")
-                
-            with open(self.HTML_FILE, encoding="utf-8") as f:
-                html_template = f.read()
+            config = configs[0]
             
-            # Create test data with common fields
-            test_data = {
-                "first_name": "Test",
-                "last_name": "User",
-                "email": recipient_email,
-                "company": "Test Company",
-                "location": "Test City"
-            }
-            
-            # Use dynamic personalization
+            # Load template from DB or file (fallback to file for now as template isn't in DB yet)
+            # TODO: Move template to DB
+            if os.path.exists("mail.html"):
+                with open("mail.html", encoding="utf-8") as f:
+                    html_template = f.read()
+            else:
+                html_template = "<h1>Hello {first_name},</h1><p>This is a test.</p>"
+
+            test_data = {"first_name": "Test", "email": recipient_email}
             html = self._personalize_email(html_template, test_data)
-            
-            # Inject Tracking for Test
             html = self._inject_tracking(html, recipient_email)
             
             msg = MIMEMultipart("alternative")
-            msg["Subject"] = "[TEST] " + "How Ghanaians Are Making ₵200–₵500/Day With AI & Phone"
+            msg["Subject"] = "[TEST] Campaign Email"
             msg["From"] = formataddr((config["DISPLAY_NAME"], config["EMAIL"]))
             msg["To"] = recipient_email
             msg.attach(MIMEText(html, "html"))
@@ -179,17 +173,15 @@ class EmailManager:
                 s.login(config["EMAIL"], config["PASSWORD"])
                 s.send_message(msg)
                 
-            self.log(f"Test email sent successfully to {recipient_email}")
-            return True, "Sent successfully"
+            self.log(f"Test email sent to {recipient_email}")
+            return True, "Sent"
         except Exception as e:
             self.log(f"Test email failed: {e}")
             return False, str(e)
 
     def start_process(self):
         if self.is_running:
-            self.log("Process is already running.")
             return
-        
         self.is_running = True
         self.stop_event.clear()
         self.status = "RUNNING"
@@ -203,12 +195,10 @@ class EmailManager:
             return
         self.log("Stopping process...")
         self.stop_event.set()
-        # We don't join here to avoid blocking API, just set flag
         self.is_running = False
         self.status = "STOPPED"
 
     def _sleep_interruptible(self, seconds, message="Waiting"):
-        """Sleeps for `seconds` but checks stop_event every second."""
         for i in range(seconds, 0, -1):
             if self.stop_event.is_set():
                 return False
@@ -220,120 +210,97 @@ class EmailManager:
 
     def _run_loop(self):
         try:
-            # Load HTML
-            if not os.path.exists(self.HTML_FILE):
-                self.log(f"Error: {self.HTML_FILE} not found.")
-                self.is_running = False
-                self.status = "ERROR"
-                return
-                
-            with open(self.HTML_FILE, encoding="utf-8") as f:
-                html_template = f.read()
-
-            # Load CSV
-            if not os.path.exists(self.CSV_FILE):
-                self.log(f"Error: {self.CSV_FILE} not found.")
-                self.is_running = False
-                self.status = "ERROR"
-                return
-
-            with open(self.CSV_FILE, encoding="utf-8") as f:
-                rows = list(csv.DictReader(f))
-                self.total_recipients = len(rows)
-
-            # Load Checkpoint
-            start_index = 0
-            if os.path.exists(self.INTERRUPT_FILE):
-                try:
-                    with open(self.INTERRUPT_FILE, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                        start_index = data.get("last_index", 0)
-                except Exception:
-                    start_index = 0
+            db = self.get_db_session()
             
-            self.current_index = start_index
-            self.log(f"Starting at index: {start_index}/{self.total_recipients}")
+            # Load Template
+            if os.path.exists("mail.html"):
+                with open("mail.html", encoding="utf-8") as f:
+                    html_template = f.read()
+            else:
+                self.log("Error: mail.html not found.")
+                self.is_running = False
+                self.status = "ERROR"
+                return
 
-            # Main Loop
-            i = start_index
-            while i < len(rows):
+            # Fetch Pending Recipients
+            recipients = db.query(Recipient).filter(Recipient.status == 'pending').all()
+            total_recipients = db.query(Recipient).count()
+            
+            if not recipients:
+                self.log("No pending recipients.")
+                self.is_running = False
+                self.status = "FINISHED"
+                return
+
+            configs = self.get_configs()
+            if not configs:
+                self.log("Error: No SMTP configs.")
+                self.is_running = False
+                self.status = "ERROR"
+                return
+
+            self.log(f"Starting campaign with {len(recipients)} pending recipients.")
+
+            sent_count_in_batch = 0
+            
+            for i, recipient in enumerate(recipients):
                 if self.stop_event.is_set():
                     break
                 
-                self.current_index = i
-                row = rows[i]
-                first = row.get("first_name", "")
-                email = row.get("email", "")
-                self.current_email = email
-
-                if not email:
-                    self.log(f"Skipping row {i+1}: No email.")
-                    i += 1
-                    continue
-
-                if email in self.unsubscribes:
-                    self.log(f"Skipping row {i+1}: Unsubscribed ({email})")
-                    i += 1
-                    continue
-
-                # Config Selection
-                num_configs = len(self.smtp_configs)
-                config_index = (i // self.SWITCH_LIMIT) % num_configs
-                current_config = self.smtp_configs[config_index]
-
-                # Prepare Email - Use dynamic personalization
-                html = self._personalize_email(html_template, row)
-                html = self._inject_tracking(html, email)
+                self.current_email = recipient.email
                 
+                # Check Unsubscribe
+                if self.is_unsubscribed(recipient.email):
+                    self.log(f"Skipping {recipient.email}: Unsubscribed")
+                    recipient.status = 'unsubscribed'
+                    db.commit()
+                    continue
+
+                # Config Rotation
+                config_index = (i // self.SWITCH_LIMIT) % len(configs)
+                current_config = configs[config_index]
+
+                # Prepare Data
+                row_data = json.loads(recipient.data) if recipient.data else {}
+                row_data['email'] = recipient.email
+                
+                html = self._personalize_email(html_template, row_data)
+                html = self._inject_tracking(html, recipient.email)
+
                 msg = MIMEMultipart("alternative")
-                msg["Subject"] = "How Ghanaians Are Making ₵200–₵500/Day With AI & Phone"
+                msg["Subject"] = "How Ghanaians Are Making ₵200–₵500/Day With AI & Phone" # TODO: Make subject dynamic
                 msg["From"] = formataddr((current_config["DISPLAY_NAME"], current_config["EMAIL"]))
-                msg["To"] = email
+                msg["To"] = recipient.email
                 msg.attach(MIMEText(html, "html"))
 
-                # Send
                 try:
                     with smtplib.SMTP(current_config["SERVER"], current_config["PORT"], timeout=30) as s:
                         s.starttls()
                         s.login(current_config["EMAIL"], current_config["PASSWORD"])
                         s.send_message(msg)
                     
-                    self.log(f"SUCCESS {i+1}/{self.total_recipients} -> {email} (Config {config_index+1})")
-                    self.sent_count_in_batch += 1
-                    
-                    # Save Progress
-                    with open(self.INTERRUPT_FILE, "w", encoding="utf-8") as f:
-                        json.dump({"last_index": i + 1}, f)
-                    
-                    i += 1 # Move to next only on success or non-critical error
+                    self.log(f"SUCCESS -> {recipient.email}")
+                    recipient.status = 'sent'
+                    db.commit()
+                    sent_count_in_batch += 1
 
-                except smtplib.SMTPDataError as e:
-                    if e.smtp_code == 550 and b'Daily user sending limit exceeded' in e.smtp_error:
-                        self.log(f"DAILY LIMIT EXCEEDED for {current_config['EMAIL']}. Pausing 12h...")
-                        if not self._sleep_interruptible(self.DAILY_LIMIT_PAUSE_SECONDS, "Daily Limit Pause"):
-                            break
-                        # Retry same index
-                        continue 
-                    else:
-                        self.log(f"SMTP Error {i+1} -> {email}: {e}")
-                        time.sleep(5)
-                        i += 1 # Skip on other errors? Original script seemed to continue.
-                
                 except Exception as e:
-                    self.log(f"Error {i+1} -> {email}: {e}")
+                    self.log(f"Error -> {recipient.email}: {e}")
+                    # Don't mark as failed immediately? Or maybe 'retry'?
+                    # For now, keep as pending or mark failed
+                    # recipient.status = 'failed' 
+                    # db.commit()
                     time.sleep(5)
-                    i += 1
 
                 # Rate Limiting
-                if self.sent_count_in_batch >= self.BATCH_SIZE:
-                    self.log(f"Batch limit {self.BATCH_SIZE} reached. Sleeping {self.LONG_WAIT_SECONDS}s...")
+                if sent_count_in_batch >= self.BATCH_SIZE:
+                    self.log(f"Batch limit reached. Sleeping {self.LONG_WAIT_SECONDS}s...")
                     if not self._sleep_interruptible(self.LONG_WAIT_SECONDS, "Batch Pause"):
                         break
-                    self.sent_count_in_batch = 0
+                    sent_count_in_batch = 0
                 else:
-                    if i < self.total_recipients:
-                        if not self._sleep_interruptible(self.SHORT_WAIT_SECONDS, "Waiting"):
-                            break
+                    if not self._sleep_interruptible(self.SHORT_WAIT_SECONDS, "Waiting"):
+                        break
 
             self.is_running = False
             self.status = "FINISHED" if not self.stop_event.is_set() else "STOPPED"
