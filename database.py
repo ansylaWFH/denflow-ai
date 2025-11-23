@@ -5,14 +5,9 @@ from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, B
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-# Use the provided Supabase URL or fallback to env var
-# Note: We need to handle the special character '@' in the password if present. 
-# The user provided: postgresql://postgres:Denzard10@db.kwnmbvqaxtoyffzpecfw.supabase.co:5432/postgres
-# The '@' in Denzard10@ needs to be URL encoded to %40 if it's part of the password, 
-# BUT wait, the connection string format is user:password@host. 
-# If the password contains @, it confuses the parser.
-# Denzard10@ -> Denzard10%40
-DEFAULT_DB_URL = "postgresql://postgres:Denzard10%40@db.kwnmbvqaxtoyffzpecfw.supabase.co:5432/postgres"
+# Supabase Connection Pooler (Transaction Mode) - More reliable for serverless
+# Format: postgresql://postgres.[PROJECT-REF]:[PASSWORD]@aws-0-us-east-1.pooler.supabase.com:6543/postgres
+DEFAULT_DB_URL = "postgresql://postgres.kwnmbvqaxtoyffzpecfw:Denzard10%40@aws-0-us-east-1.pooler.supabase.com:6543/postgres"
 
 DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_DB_URL)
 
@@ -20,7 +15,18 @@ DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_DB_URL)
 if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-engine = create_engine(DATABASE_URL)
+# Create engine with connection pooling optimized for serverless
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,  # Verify connections before using
+    pool_recycle=300,    # Recycle connections after 5 minutes
+    pool_size=5,         # Smaller pool for serverless
+    max_overflow=10,
+    connect_args={
+        "connect_timeout": 10,
+        "options": "-c statement_timeout=30000"  # 30 second query timeout
+    }
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
