@@ -5,7 +5,7 @@ import 'react-quill/dist/quill.snow.css';
 import {
   Play, Square, Settings, FileText, Users,
   Activity, Terminal, Save, Upload, RefreshCw,
-  Smartphone, Monitor, Send, Clock
+  Smartphone, Monitor, Send, Clock, Menu, X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
