@@ -33,7 +33,13 @@ if os.path.exists("frontend/dist"):
     @app.get("/")
     def serve_frontend():
         with open("frontend/dist/index.html", "r", encoding="utf-8") as f:
-            return HTMLResponse(content=f.read())
+            content = f.read()
+            response = HTMLResponse(content=content)
+            # Prevent caching of index.html so users always get the latest version
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+            return response
 else:
     print("❌ frontend/dist NOT found. Running in API-only mode or local dev.")
 
