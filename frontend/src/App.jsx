@@ -183,6 +183,15 @@ const NavTab = ({ icon: Icon, label, active, onClick }) => (
 // Dashboard Mobile View
 const DashboardMobile = ({ status, onStart, onStop, logsEndRef }) => {
     const [analytics, setAnalytics] = useState({ opens: 0, unsubscribes: 0 });
+    const [showScheduler, setShowScheduler] = useState(false);
+    const [showUnsubscribes, setShowUnsubscribes] = useState(false);
+    const [schedules, setSchedules] = useState([]);
+    const [unsubscribeList, setUnsubscribeList] = useState([]);
+    const [newSchedule, setNewSchedule] = useState({
+        name: "",
+        scheduled_time: "",
+        recurring: "none"
+    });
 
     useEffect(() => {
         const fetchAnalytics = async () => {
@@ -196,6 +205,68 @@ const DashboardMobile = ({ status, onStart, onStop, logsEndRef }) => {
         return () => clearInterval(interval);
     }, []);
 
+    const fetchSchedules = async () => {
+        try {
+            const res = await axios.get(`${API_URL}/schedules`);
+            setSchedules(res.data.schedules || []);
+        } catch (e) {
+            console.error("Failed to fetch schedules", e);
+        }
+    };
+
+    const fetchUnsubscribes = async () => {
+        try {
+            const res = await axios.get(`${API_URL}/unsubscribes`);
+            setUnsubscribeList(res.data.unsubscribes || []);
+        } catch (e) {
+            console.error("Failed to fetch unsubscribes", e);
+        }
+    };
+
+    useEffect(() => {
+        if (showScheduler) fetchSchedules();
+    }, [showScheduler]);
+
+    useEffect(() => {
+        if (showUnsubscribes) fetchUnsubscribes();
+    }, [showUnsubscribes]);
+
+    const handleCreateSchedule = async () => {
+        if (!newSchedule.name || !newSchedule.scheduled_time) {
+            alert("Please fill in all fields");
+            return;
+        }
+        try {
+            await axios.post(`${API_URL}/schedules`, newSchedule);
+            setNewSchedule({ name: "", scheduled_time: "", recurring: "none" });
+            fetchSchedules();
+            alert("Schedule created successfully!");
+        } catch (e) {
+            alert("Failed to create schedule: " + e.message);
+        }
+    };
+
+    const handleDeleteSchedule = async (scheduleId) => {
+        if (!confirm("Delete this scheduled campaign?")) return;
+        try {
+            await axios.delete(`${API_URL}/schedules/${scheduleId}`);
+            fetchSchedules();
+        } catch (e) {
+            alert("Failed to delete: " + e.message);
+        }
+    };
+
+    const handleRemoveUnsubscribe = async (email) => {
+        if (!confirm(`Remove ${email} from unsubscribe list?`)) return;
+        try {
+            await axios.post(`${API_URL}/unsubscribes/remove`, { email });
+            fetchUnsubscribes();
+            alert(`${email} removed from unsubscribe list`);
+        } catch (e) {
+            alert("Failed to remove: " + e.message);
+        }
+    };
+
     const progress = status.total_recipients > 0
         ? (status.current_index / status.total_recipients) * 100
         : 0;
@@ -206,9 +277,40 @@ const DashboardMobile = ({ status, onStart, onStop, logsEndRef }) => {
             <div className="grid grid-cols-2 gap-3">
                 <StatCardMobile label="Progress" value={`${status.current_index}/${status.total_recipients}`} color="blue" />
                 <StatCardMobile label="Opens" value={analytics.opens} color="green" />
-                <StatCardMobile label="Unsubscribes" value={analytics.unsubscribes} color="red" />
+                <div onClick={() => setShowUnsubscribes(!showUnsubscribes)} className="cursor-pointer">
+                    <StatCardMobile label="Unsubscribes" value={analytics.unsubscribes} color="red" />
+                </div>
                 <StatCardMobile label="Status" value={status.status} color="purple" />
             </div>
+
+            {/* Unsubscribes Panel */}
+            <AnimatePresence>
+                {showUnsubscribes && (
+                    <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm overflow-hidden"
+                    >
+                        <div className="flex justify-between items-center mb-3">
+                            <h3 className="text-sm font-bold text-gray-900 dark:text-white">Unsubscribed List</h3>
+                            <button onClick={() => setShowUnsubscribes(false)}><X size={16} /></button>
+                        </div>
+                        <div className="max-h-48 overflow-y-auto space-y-2">
+                            {unsubscribeList.length === 0 ? (
+                                <div className="text-xs text-center text-gray-500 py-4">No unsubscribes found</div>
+                            ) : (
+                                unsubscribeList.map((email, i) => (
+                                    <div key={i} className="flex justify-between items-center bg-gray-50 dark:bg-gray-900 p-2 rounded-lg">
+                                        <span className="text-xs font-mono">{email}</span>
+                                        <button onClick={() => handleRemoveUnsubscribe(email)} className="text-red-500 text-xs">Remove</button>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {/* Progress Bar */}
             <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm">
@@ -243,6 +345,76 @@ const DashboardMobile = ({ status, onStart, onStop, logsEndRef }) => {
                     <span>Stop</span>
                 </button>
             </div>
+
+            {/* Scheduler Toggle */}
+            <button
+                onClick={() => setShowScheduler(!showScheduler)}
+                className="w-full bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-300 font-medium py-3 px-6 rounded-xl flex items-center justify-center space-x-2 border border-purple-200 dark:border-purple-800"
+            >
+                <Clock size={18} />
+                <span>{showScheduler ? 'Hide Scheduler' : 'Schedule Campaign'}</span>
+            </button>
+
+            {/* Scheduler Panel */}
+            <AnimatePresence>
+                {showScheduler && (
+                    <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm overflow-hidden space-y-4"
+                    >
+                        <h3 className="text-sm font-bold text-gray-900 dark:text-white">New Schedule</h3>
+                        <div className="space-y-3">
+                            <input
+                                type="text"
+                                placeholder="Campaign Name"
+                                value={newSchedule.name}
+                                onChange={(e) => setNewSchedule({ ...newSchedule, name: e.target.value })}
+                                className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm"
+                            />
+                            <input
+                                type="datetime-local"
+                                value={newSchedule.scheduled_time}
+                                onChange={(e) => setNewSchedule({ ...newSchedule, scheduled_time: e.target.value.replace('T', ' ') + ':00' })}
+                                className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm"
+                            />
+                            <select
+                                value={newSchedule.recurring}
+                                onChange={(e) => setNewSchedule({ ...newSchedule, recurring: e.target.value })}
+                                className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm"
+                            >
+                                <option value="none">One-time</option>
+                                <option value="daily">Daily</option>
+                                <option value="weekly">Weekly</option>
+                            </select>
+                            <button onClick={handleCreateSchedule} className="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 rounded-lg text-sm">
+                                Create Schedule
+                            </button>
+                        </div>
+
+                        <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                            <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-2">Scheduled Campaigns</h3>
+                            <div className="space-y-2 max-h-48 overflow-y-auto">
+                                {schedules.length === 0 ? (
+                                    <div className="text-xs text-center text-gray-500">No schedules</div>
+                                ) : (
+                                    schedules.map((sch) => (
+                                        <div key={sch.id} className="bg-gray-50 dark:bg-gray-900 p-3 rounded-lg flex justify-between items-start">
+                                            <div>
+                                                <div className="text-sm font-medium">{sch.name}</div>
+                                                <div className="text-xs text-gray-500">{sch.scheduled_time}</div>
+                                                <div className="text-xs text-purple-500 mt-1 capitalize">{sch.status}</div>
+                                            </div>
+                                            <button onClick={() => handleDeleteSchedule(sch.id)} className="text-red-500 p-1"><X size={16} /></button>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {/* Logs */}
             <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm">
@@ -389,9 +561,13 @@ const HistoryMobile = () => {
 // Settings Mobile View
 const SettingsMobile = ({ configs, onSave }) => {
     const [localConfigs, setLocalConfigs] = useState(configs);
+    const [publicUrl, setPublicUrl] = useState("");
 
     useEffect(() => {
         if (configs.length > 0) setLocalConfigs(configs);
+        axios.get(`${API_URL}/config`).then(res => {
+            if (res.data.public_url) setPublicUrl(res.data.public_url);
+        });
     }, [configs]);
 
     const handleChange = (index, field, value) => {
@@ -400,44 +576,141 @@ const SettingsMobile = ({ configs, onSave }) => {
         setLocalConfigs(newConfigs);
     };
 
+    const handleAddConfig = () => {
+        const newConfig = {
+            SERVER: "smtp.gmail.com",
+            PORT: 587,
+            EMAIL: "",
+            PASSWORD: "",
+            DISPLAY_NAME: ""
+        };
+        setLocalConfigs([...localConfigs, newConfig]);
+    };
+
+    const handleRemoveConfig = (index) => {
+        if (localConfigs.length <= 1) {
+            alert("You must have at least one SMTP configuration");
+            return;
+        }
+        if (!confirm("Remove this configuration?")) return;
+        const newConfigs = localConfigs.filter((_, i) => i !== index);
+        setLocalConfigs(newConfigs);
+    };
+
+    const handleSaveAll = async () => {
+        await onSave(localConfigs);
+        await axios.post(`${API_URL}/config/url`, { url: publicUrl });
+    };
+
     return (
-        <div className="p-4 space-y-4">
-            {localConfigs.map((config, idx) => (
-                <div key={idx} className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm space-y-3">
-                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white">SMTP Config {idx + 1}</h3>
-                    <input
-                        type="text"
-                        placeholder="Server"
-                        value={config.SERVER}
-                        onChange={(e) => handleChange(idx, 'SERVER', e.target.value)}
-                        className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white"
-                    />
-                    <input
-                        type="number"
-                        placeholder="Port"
-                        value={config.PORT}
-                        onChange={(e) => handleChange(idx, 'PORT', e.target.value)}
-                        className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white"
-                    />
-                    <input
-                        type="email"
-                        placeholder="Email"
-                        value={config.EMAIL}
-                        onChange={(e) => handleChange(idx, 'EMAIL', e.target.value)}
-                        className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white"
-                    />
-                    <input
-                        type="password"
-                        placeholder="Password"
-                        value={config.PASSWORD}
-                        onChange={(e) => handleChange(idx, 'PASSWORD', e.target.value)}
-                        className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white"
-                    />
+        <div className="p-4 space-y-6">
+            {/* Public URL Section */}
+            <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm space-y-3">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Public Tracking Domain</h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Required for open tracking. Enter your Render URL (e.g., https://your-app.onrender.com)
+                </p>
+                <input
+                    type="text"
+                    placeholder="https://your-app.onrender.com"
+                    value={publicUrl}
+                    onChange={(e) => setPublicUrl(e.target.value)}
+                    className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white"
+                />
+            </div>
+
+            {/* SMTP Configs */}
+            <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-bold text-gray-900 dark:text-white">SMTP Configurations</h3>
+                    <button
+                        onClick={handleAddConfig}
+                        className="text-sm bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-3 py-1.5 rounded-lg font-medium"
+                    >
+                        + Add New
+                    </button>
                 </div>
-            ))}
-            <button onClick={() => onSave(localConfigs)} className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-4 px-6 rounded-xl flex items-center justify-center space-x-2 shadow-lg">
+
+                {localConfigs.length === 0 && (
+                    <div className="text-center p-8 bg-gray-100 dark:bg-gray-800 rounded-2xl text-gray-500">
+                        No configurations yet. Click "Add New" to start.
+                    </div>
+                )}
+
+                {localConfigs.map((config, idx) => (
+                    <div key={idx} className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm space-y-3 relative">
+                        <div className="flex justify-between items-center mb-2">
+                            <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Config #{idx + 1}</h3>
+                            <button
+                                onClick={() => handleRemoveConfig(idx)}
+                                className="text-red-500 p-1 hover:bg-red-50 rounded"
+                            >
+                                <X size={16} />
+                            </button>
+                        </div>
+
+                        <div className="space-y-3">
+                            <div>
+                                <label className="text-xs text-gray-500 mb-1 block">SMTP Server</label>
+                                <input
+                                    type="text"
+                                    placeholder="smtp.gmail.com"
+                                    value={config.SERVER}
+                                    onChange={(e) => handleChange(idx, 'SERVER', e.target.value)}
+                                    className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs text-gray-500 mb-1 block">Port</label>
+                                <input
+                                    type="number"
+                                    placeholder="587"
+                                    value={config.PORT}
+                                    onChange={(e) => handleChange(idx, 'PORT', e.target.value)}
+                                    className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs text-gray-500 mb-1 block">Email Address</label>
+                                <input
+                                    type="email"
+                                    placeholder="you@gmail.com"
+                                    value={config.EMAIL}
+                                    onChange={(e) => handleChange(idx, 'EMAIL', e.target.value)}
+                                    className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs text-gray-500 mb-1 block">App Password</label>
+                                <input
+                                    type="password"
+                                    placeholder="xxxx xxxx xxxx xxxx"
+                                    value={config.PASSWORD}
+                                    onChange={(e) => handleChange(idx, 'PASSWORD', e.target.value)}
+                                    className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs text-gray-500 mb-1 block">Display Name</label>
+                                <input
+                                    type="text"
+                                    placeholder="Your Name"
+                                    value={config.DISPLAY_NAME}
+                                    onChange={(e) => handleChange(idx, 'DISPLAY_NAME', e.target.value)}
+                                    className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white"
+                                />
+                            </div>
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            <button
+                onClick={handleSaveAll}
+                className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-4 px-6 rounded-xl flex items-center justify-center space-x-2 shadow-lg sticky bottom-20 z-10"
+            >
                 <Save size={20} />
-                <span>Save Settings</span>
+                <span>Save All Settings</span>
             </button>
         </div>
     );
