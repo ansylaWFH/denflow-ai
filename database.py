@@ -5,8 +5,9 @@ from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, B
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-# Direct Supabase connection (more reliable than pooler for this use case)
-DEFAULT_DB_URL = "postgresql://postgres:Denzard10%40@db.kwnmbvqaxtoyffzpecfw.supabase.co:5432/postgres"
+# Supabase Session Pooler (IPv4 compatible)
+# Using pooler subdomain instead of direct db connection
+DEFAULT_DB_URL = "postgresql://postgres:Denzard10%40@aws-0-us-east-1.pooler.supabase.com:5432/postgres?pgbouncer=true"
 
 DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_DB_URL)
 
