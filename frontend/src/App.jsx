@@ -49,6 +49,7 @@ function App() {
 
 function AppContent() {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [status, setStatus] = useState({
     status: 'IDLE',
     current_index: 0,
@@ -128,62 +129,100 @@ function AppContent() {
   }, [activeTab]);
 
   return (
-    <div className="flex h-screen w-full max-w-[1600px] mx-auto text-white overflow-hidden font-sans selection:bg-indigo-500 selection:text-white">
-      {/* Sidebar */}
-      <div className="w-72 m-6 flex flex-col space-y-6">
-        <div className="glass-panel p-6 flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/30">
-            <Send size={20} className="text-white" />
+    <div className="flex flex-col h-screen w-full text-white overflow-hidden font-sans selection:bg-indigo-500 selection:text-white">
+      {/* Mobile Header */}
+      <div className="md:hidden flex items-center justify-between p-4 bg-black/50 backdrop-blur-lg border-b border-white/10">
+        <button
+          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+          className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+        >
+          {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+        </button>
+        <div className="flex items-center space-x-2">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
+            <Send size={16} className="text-white" />
           </div>
-          <div>
-            <h1 className="text-xl font-bold tracking-tight">MailFlow AI</h1>
-            <div className="text-xs text-gray-400 font-medium">v2.0 Premium</div>
-          </div>
+          <h1 className="text-lg font-bold">MailFlow AI</h1>
         </div>
-
-        <div className="glass-panel flex-1 p-4 space-y-2">
-          <NavButton icon={Activity} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
-          <NavButton icon={FileText} label="Template" active={activeTab === 'template'} onClick={() => setActiveTab('template')} />
-          <NavButton icon={Users} label="Recipients" active={activeTab === 'recipients'} onClick={() => setActiveTab('recipients')} />
-          <NavButton icon={Clock} label="History" active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
-          <div className="h-px bg-white/10 my-2 mx-2"></div>
-          <NavButton icon={Settings} label="Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
-        </div>
+        <div className="w-10"></div> {/* Spacer for centering */}
       </div>
 
-      {/* Main Content */}
-      <div className="flex-1 p-6 pl-0 overflow-hidden">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={activeTab}
-            initial={{ opacity: 0, scale: 0.98, filter: 'blur(10px)' }}
-            animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-            exit={{ opacity: 0, scale: 1.02, filter: 'blur(10px)' }}
-            transition={{ duration: 0.3, ease: "easeOut" }}
-            className="h-full"
+      <div className="flex flex-1 overflow-hidden">
+        {/* Sidebar - Hidden on mobile by default */}
+        <div className={`
+          fixed md:relative inset-y-0 left-0 z-50
+          w-72 md:w-72 
+          transform transition-transform duration-300 ease-in-out
+          ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+          md:m-6 flex flex-col space-y-6
+          bg-black/95 md:bg-transparent
+          backdrop-blur-xl md:backdrop-blur-none
+          p-6 md:p-0
+        `}>
+          {/* Close button for mobile */}
+          <button
+            onClick={() => setIsMobileMenuOpen(false)}
+            className="md:hidden absolute top-4 right-4 p-2 hover:bg-white/10 rounded-lg"
           >
-            {activeTab === 'dashboard' && (
-              <Dashboard
-                status={status}
-                onStart={handleStart}
-                onStop={handleStop}
-                logsEndRef={logsEndRef}
-              />
-            )}
-            {activeTab === 'settings' && (
-              <SettingsPanel configs={status.configs} onSave={handleSaveConfig} />
-            )}
-            {activeTab === 'template' && (
-              <TemplateEditor template={template} setTemplate={setTemplate} onSave={handleSaveTemplate} />
-            )}
-            {activeTab === 'recipients' && (
-              <RecipientsView recipients={recipients} onUpload={handleFileUpload} />
-            )}
-            {activeTab === 'history' && (
-              <HistoryView />
-            )}
-          </motion.div>
-        </AnimatePresence>
+            <X size={20} />
+          </button>
+
+          <div className="glass-panel p-6 flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/30">
+              <Send size={20} className="text-white" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold tracking-tight">MailFlow AI</h1>
+              <div className="text-xs text-gray-400 font-medium">v2.0 Premium</div>
+            </div>
+          </div>
+
+          <div className="glass-panel flex-1 p-4 space-y-2"
+            onClick={() => setIsMobileMenuOpen(false)} // Close menu when clicking nav item on mobile
+          >
+            <NavButton icon={Activity} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
+            <NavButton icon={FileText} label="Template" active={activeTab === 'template'} onClick={() => setActiveTab('template')} />
+            <NavButton icon={Users} label="Recipients" active={activeTab === 'recipients'} onClick={() => setActiveTab('recipients')} />
+            <NavButton icon={Clock} label="History" active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
+            <div className="h-px bg-white/10 my-2 mx-2"></div>
+            <NavButton icon={Settings} label="Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
+          </div>
+        </div>
+
+        {/* Main Content */}
+        <div className="flex-1 p-6 pl-0 overflow-hidden">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeTab}
+              initial={{ opacity: 0, scale: 0.98, filter: 'blur(10px)' }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, scale: 1.02, filter: 'blur(10px)' }}
+              transition={{ duration: 0.3, ease: "easeOut" }}
+              className="h-full"
+            >
+              {activeTab === 'dashboard' && (
+                <Dashboard
+                  status={status}
+                  onStart={handleStart}
+                  onStop={handleStop}
+                  logsEndRef={logsEndRef}
+                />
+              )}
+              {activeTab === 'settings' && (
+                <SettingsPanel configs={status.configs} onSave={handleSaveConfig} />
+              )}
+              {activeTab === 'template' && (
+                <TemplateEditor template={template} setTemplate={setTemplate} onSave={handleSaveTemplate} />
+              )}
+              {activeTab === 'recipients' && (
+                <RecipientsView recipients={recipients} onUpload={handleFileUpload} />
+              )}
+              {activeTab === 'history' && (
+                <HistoryView />
+              )}
+            </motion.div>
+          </AnimatePresence>
+        </div>
       </div>
     </div>
   );
