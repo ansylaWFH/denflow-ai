@@ -12,3 +12,10 @@ echo "Building frontend..."
 npm run build
 
 echo "Build complete!"
+echo "Current directory:"
+pwd
+echo "Listing dist directory:"
+ls -R dist
+cd ..
+echo "Listing frontend directory from root:"
+ls -R frontend

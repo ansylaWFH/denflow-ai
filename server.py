@@ -42,6 +42,12 @@ if os.path.exists("frontend/dist"):
             return response
 else:
     print("❌ frontend/dist NOT found. Running in API-only mode or local dev.")
+    print("Current working directory:", os.getcwd())
+    print("Listing current directory:", os.listdir("."))
+    if os.path.exists("frontend"):
+        print("Listing frontend directory:", os.listdir("frontend"))
+    else:
+        print("❌ 'frontend' directory not found in current directory!")
 
 manager = EmailManager()
 scheduler = CampaignScheduler(manager)
