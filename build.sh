@@ -1,12 +1,14 @@
-#!/bin/bash
-# Build script for Render
+#!/usr/bin/env bash
+# Exit on error
+set -e
 
-echo "Installing Python dependencies..."
+# Install Python dependencies
 pip install -r requirements.txt
 
-echo "Installing Node.js dependencies..."
+# Build Frontend
 cd frontend
-npm install
+# Ensure we install ALL dependencies including devDependencies (where vite is)
+npm install --include=dev
 
 echo "Building frontend..."
 npm run build
