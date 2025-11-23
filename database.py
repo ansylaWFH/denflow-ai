@@ -5,13 +5,12 @@ from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, B
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-# Supabase Connection Pooler (Transaction Mode) - More reliable for serverless
-# Format: postgresql://postgres.[PROJECT-REF]:[PASSWORD]@aws-0-us-east-1.pooler.supabase.com:6543/postgres
-DEFAULT_DB_URL = "postgresql://postgres.kwnmbvqaxtoyffzpecfw:Denzard10%40@aws-0-us-east-1.pooler.supabase.com:6543/postgres"
+# Direct Supabase connection (more reliable than pooler for this use case)
+DEFAULT_DB_URL = "postgresql://postgres:Denzard10%40@db.kwnmbvqaxtoyffzpecfw.supabase.co:5432/postgres"
 
 DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_DB_URL)
 
-# Ensure we use postgresql:// instead of postgres:// (deprecated in SQLAlchemy 1.4)
+# Ensure we use postgresql:// instead of postgres://
 if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
@@ -24,7 +23,10 @@ engine = create_engine(
     max_overflow=10,
     connect_args={
         "connect_timeout": 10,
-        "options": "-c statement_timeout=30000"  # 30 second query timeout
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 5,
     }
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
