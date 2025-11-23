@@ -23,12 +23,19 @@ app.add_middleware(
 
 # Serve static files (built frontend) in production
 if os.path.exists("frontend/dist"):
+    print("✅ frontend/dist found!")
+    print("Contents of frontend/dist:", os.listdir("frontend/dist"))
+    if os.path.exists("frontend/dist/assets"):
+        print("Contents of frontend/dist/assets:", os.listdir("frontend/dist/assets"))
+    
     app.mount("/assets", StaticFiles(directory="frontend/dist/assets"), name="assets")
     
     @app.get("/")
     def serve_frontend():
         with open("frontend/dist/index.html", "r", encoding="utf-8") as f:
             return HTMLResponse(content=f.read())
+else:
+    print("❌ frontend/dist NOT found. Running in API-only mode or local dev.")
 
 manager = EmailManager()
 scheduler = CampaignScheduler(manager)
